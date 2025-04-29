@@ -1,0 +1,364 @@
+
+    // Inisialisasi IndexedDB
+        let db;
+        const request = indexedDB.open('bookmarkDB', 1);
+
+        request.onupgradeneeded = function(event) {
+            db = event.target.result;
+            db.createObjectStore('bookmarks', { keyPath: 'id', autoIncrement: true });
+        };
+
+        request.onsuccess = function(event) {
+            db = event.target.result;
+        };
+
+        function showNotification(message) {
+            const notification = document.getElementById('kazuNotif');
+            notification.innerText = message;
+            notification.style.display = 'block';
+
+            setTimeout(() => {
+                notification.style.display = 'none';
+                notification.innerHTML = ''; // Kosongkan isi notifikasi
+            }, 3000); // Sembunyikan setelah 3 detik
+        }
+
+        document.getElementById('bookmarkBtn').addEventListener('click', function() {
+            const pageTitle = document.title;
+            const pageUrl = window.location.href;
+
+            // Mencari gambar dari elemen <img> pertama
+            const imgElement = document.querySelector('img');
+            let thumbnailUrl = imgElement ? imgElement.src : 'https://via.placeholder.com/150'; // Gambar default jika tidak ada gambar
+
+            // Mencari gambar dari tag <meta> Open Graph
+            const ogImage = document.querySelector('meta[property="og:image"]');
+            if (ogImage) {
+                thumbnailUrl = ogImage.content;
+            }
+
+            const category = prompt("Masukkan kategori bookmark (opsional):") || "Umum"; // Kategori
+
+            // Cek apakah URL sudah ada di database
+            const transaction = db.transaction(['bookmarks'], 'readonly');
+            const store = transaction.objectStore('bookmarks');
+            const getRequest = store.getAll();
+
+            getRequest.onsuccess = function() {
+                const bookmarks = getRequest.result;
+                const isDuplicate = bookmarks.some(bookmark => bookmark.url === pageUrl);
+
+                if (isDuplicate) {
+                    alert('Bookmark ini sudah ada!');
+                } else {
+                    // Jika tidak ada duplikasi, tambahkan bookmark
+                    const addTransaction = db.transaction(['bookmarks'], 'readwrite');
+                    const addStore = addTransaction.objectStore('bookmarks');
+                    addStore.add({ title: pageTitle, url: pageUrl, thumbnail: thumbnailUrl, category: category, date: new Date(), favorite: false });
+
+                    // Ubah teks tombol menjadi "Bookmarked"
+                    this.innerText = 'Bookmarked';
+                    this.disabled = true; // Menonaktifkan tombol setelah dibookmark
+
+                    showNotification('Halaman ini telah dibookmark!');
+                }
+            }.bind(this); // Bind 'this' untuk mengakses tombol
+        });
+  
+  
+        const bookmarkList = document.getElementById('bookmarkList');
+        const favoriteList = document.getElementById('favoriteList');
+        const categoryFilter = document.getElementById('categoryFilter');
+        let categories = new Set();
+
+        // Inisialisasi IndexedDB
+        let db;
+        const request = indexedDB.open('bookmarkDB', 1);
+
+        request.onupgradeneeded = function(event) {
+            db = event.target.result;
+            db.createObjectStore('bookmarks', { keyPath: 'id', autoIncrement: true });
+        };
+
+        request.onsuccess = function(event) {
+            db = event.target.result;
+            loadBookmarks();
+        };
+
+        function loadBookmarks() {
+            document.getElementById('kazuLoad-bookmarks').style.display = 'block'; // Tampilkan loading untuk bookmark
+            const transaction = db.transaction(['bookmarks'], 'readonly');
+            const store = transaction.objectStore('bookmarks');
+            const getAll = store.getAll();
+
+            getAll.onsuccess = function() {
+                const bookmarks = getAll.result;
+                bookmarkList.innerHTML = ''; // Kosongkan daftar sebelum diisi ulang
+                favoriteList.innerHTML = ''; // Kosongkan daftar favorit sebelum diisi ulang
+                categories.clear();
+
+                bookmarks.forEach((bookmark) => {
+                    categories.add(bookmark.category);
+                    const li = document.createElement('li');
+                    li.dataset.date = bookmark.date; // Simpan tanggal untuk pengurutan
+                    li.innerHTML = `
+                        <div style="display: flex; flex-direction: column; align-items: flex-start; border: 1px solid #e0e0e0; border-radius: 5px; padding: 10px; margin-bottom: 10px;">
+                            <a href="${bookmark.url}" style="text-decoration: none; color: inherit;">
+                                <img src="${bookmark.thumbnail}" alt="${bookmark.title}" style="max-width: 100%; height: auto; margin-bottom: 10px; border-radius: 5px;">
+                            </a>
+                            <a href="${bookmark.url}" style="text-decoration: none; color: inherit;">
+                                <span data-category="${bookmark.category}" style="font-weight: bold; font-size: 1.2em; margin-bottom: 5px;">${bookmark.title}</span>
+                            </a>
+                            <span style="font-size: 0.9em; color: #6c757d; margin-bottom: 10px;">Kategori: ${bookmark.category}</span>
+                            <div>
+                                <button onclick="toggleFavorite(${bookmark.id})" style="padding: 5px 10px; background-color: ${bookmark.favorite ? '#ffc107' : '#007bff'}; color: white; border: none; border-radius: 5px; cursor: pointer;">
+                                    <i class="fas ${bookmark.favorite ? 'fa-star' : 'fa-star-o'}"></i> ${bookmark.favorite ? 'Batal Favorit' : 'Favorit'}
+                                </button>
+                                <button onclick="editBookmark(${bookmark.id})" style="padding: 5px 10px; background-color: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer;"><i class="fas fa-edit"></i> Edit Kategori
+      </button>
+                                <button onclick="deleteBookmark(${bookmark.id})" style="padding: 5px 10px; background-color: #dc3545; color: white; border: none; border-radius: 5px; cursor: pointer;"> <i class="fas fa-trash"></i> Hapus
+</button>
+                            </div>
+                        </div>
+                    `;
+                    if (bookmark.favorite) {
+                        favoriteList.appendChild(li.cloneNode(true)); // Tambahkan ke daftar favorit
+                    } else {
+                        bookmarkList.appendChild(li); // Tambahkan ke daftar biasa
+                    }
+                });
+
+                // Update kategori filter
+                updateCategoryFilter();
+                document.getElementById('kazuLoad-bookmarks').style.display = 'none'; // Sembunyikan loading untuk bookmark
+            };
+        }
+
+        function loadFavorites() {
+            document.getElementById('kazuLoad-favorites').style.display = 'block'; // Tampilkan loading untuk favorit
+            const transaction = db.transaction(['bookmarks'], 'readonly');
+            const store = transaction.objectStore('bookmarks');
+            const getAll = store.getAll();
+
+            getAll.onsuccess = function() {
+                const bookmarks = getAll.result;
+                favoriteList.innerHTML = ''; // Kosongkan daftar favorit sebelum diisi ulang
+
+                bookmarks.forEach((bookmark) => {
+                    if (bookmark.favorite) {
+                        const li = document.createElement('li');
+                        li.dataset.date = bookmark.date; // Simpan tanggal untuk pengurutan
+                        li.innerHTML = `
+                            <div style="display: flex; flex-direction: column; align-items: flex-start; border: 1px solid #e0e0e0; border-radius: 5px; padding: 10px; margin-bottom: 10px;">
+                                <a href="${bookmark.url}" style="text-decoration: none; color: inherit;">
+                                    <img src="${bookmark.thumbnail}" alt="${bookmark.title}" style="max-width: 100%; height: auto; margin-bottom: 10px; border-radius: 5px;">
+                                </a>
+                                <a href="${bookmark.url}" style="text-decoration: none; color: inherit;">
+                                    <span data-category="${bookmark.category}" style="font-weight: bold; font-size: 1.2em; margin-bottom: 5px;">${bookmark.title}</span>
+                                </a>
+                                <span style="font-size: 0.9em; color: #6c757d; margin-bottom: 10px;">Kategori: ${bookmark.category}</span>
+                                <div>
+                                    <button onclick="toggleFavorite(${bookmark.id})" style="padding: 5px 10px; background-color: #ffc107; color: white; border: none; border-radius: 5px; cursor: pointer;">
+                                        <i class="fas fa-star"></i> Batal Favorit
+                                    </button>
+                                    <button onclick="editBookmark(${bookmark.id})" style="padding: 5px 10px; background-color: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer;">Edit Kategori</button>
+                                    <button onclick="deleteBookmark(${bookmark.id})" style="padding: 5px 10px; background-color: #dc3545; color: white; border: none; border-radius: 5px; cursor: pointer;">Hapus</button>
+                                </div>
+                            </div>
+                        `;
+                        favoriteList.appendChild(li); // Tambahkan ke daftar favorit
+                    }
+                });
+
+                document.getElementById('kazuLoad-favorites').style.display = 'none'; // Sembunyikan loading untuk favorit
+            };
+        }
+
+        function updateCategoryFilter() {
+            categoryFilter.innerHTML = '<option value="">Semua Kategori</option>';
+            categories.forEach(category => {
+                const option = document.createElement('option');
+                option.value = category;
+                option.textContent = category;
+                categoryFilter.appendChild(option);
+            });
+        }
+
+        function deleteBookmark(id) {
+            if (confirm("Apakah Anda yakin ingin menghapus bookmark ini?")) {
+                const transaction = db.transaction(['bookmarks'], 'readwrite');
+                const store = transaction.objectStore('bookmarks');
+                store.delete(id);
+                loadBookmarks(); // Muat ulang bookmark setelah dihapus
+
+                // Tampilkan notifikasi
+                showNotification('Bookmark telah dihapus!');
+            }
+        }
+
+        function editBookmark(id) {
+            const newCategory = prompt("Masukkan kategori baru:");
+            if (newCategory) {
+                const transaction = db.transaction(['bookmarks'], 'readwrite');
+                const store = transaction.objectStore('bookmarks');
+                const getRequest = store.get(id);
+
+                getRequest.onsuccess = function() {
+                    const bookmark = getRequest.result;
+                    bookmark.category = newCategory; // Update kategori
+                    store.put(bookmark); // Simpan perubahan
+                    loadBookmarks(); // Muat ulang bookmark
+                    showNotification('Kategori bookmark telah diperbarui!'); // Notifikasi
+                };
+            }
+        }
+
+        function toggleFavorite(id) {
+            const transaction = db.transaction(['bookmarks'], 'readwrite');
+            const store = transaction.objectStore('bookmarks');
+            const getRequest = store.get(id);
+
+            getRequest.onsuccess = function() {
+                const bookmark = getRequest.result;
+                bookmark.favorite = !bookmark.favorite; // Toggle favorit
+                store.put(bookmark); // Simpan perubahan
+                loadBookmarks(); // Muat ulang bookmark
+            };
+        }
+
+        function showNotification(message) {
+            const notification = document.getElementById('kazuNotif');
+            notification.innerText = message;
+            notification.style.display = 'block';
+
+            setTimeout(() => {
+                notification.style.display = 'none';
+                notification.innerHTML = ''; // Kosongkan isi notifikasi
+            }, 3000); // Sembunyikan setelah 3 detik
+        }
+
+        document.getElementById('searchInput').addEventListener('input', function() {
+            const searchTerm = this.value.toLowerCase();
+            const items = bookmarkList.getElementsByTagName('li');
+
+            Array.from(items).forEach((item) => {
+                const title = item.querySelector('span').textContent.toLowerCase();
+                item.style.display = title.includes(searchTerm) ? 'flex' : 'none';
+            });
+        });
+
+        categoryFilter.addEventListener('change', function() {
+            const selectedCategory = this.value;
+            const items = bookmarkList.getElementsByTagName('li');
+
+            Array.from(items).forEach((item) => {
+                const category = item.querySelector('span').dataset.category;
+                item.style.display = selectedCategory === '' || category === selectedCategory ? 'flex' : 'none';
+            });
+        });
+
+        document.getElementById('sortAsc').addEventListener('click', function() {
+            sortBookmarks(true);
+        });
+
+        document.getElementById('sortDesc').addEventListener('click', function() {
+            sortBookmarks(false);
+        });
+
+        document.getElementById('sortByDate').addEventListener('click', function() {
+            sortBookmarksByDate(true); // Urutkan ascending
+        });
+
+        function sortBookmarks(ascending) {
+            const items = Array.from(bookmarkList.getElementsByTagName('li'));
+            items.sort((a, b) => {
+                const titleA = a.querySelector('span').textContent.toLowerCase();
+                const titleB = b.querySelector('span').textContent.toLowerCase();
+                return ascending ? titleA.localeCompare(titleB) : titleB.localeCompare(titleA);
+            });
+            bookmarkList.innerHTML = '';
+            items.forEach(item => bookmarkList.appendChild(item));
+        }
+
+        function sortBookmarksByDate(ascending) {
+            const items = Array.from(bookmarkList.getElementsByTagName('li'));
+            items.sort((a, b) => {
+                const dateA = new Date(a.dataset.date);
+                const dateB = new Date(b.dataset.date);
+                return ascending ? dateA - dateB : dateB - dateA;
+            });
+            bookmarkList.innerHTML = '';
+            items.forEach(item => bookmarkList.appendChild(item));
+        }
+
+        document.getElementById('exportBtn').addEventListener('click', function() {
+            const transaction = db.transaction(['bookmarks'], 'readonly');
+            const store = transaction.objectStore('bookmarks');
+            const getAll = store.getAll();
+
+            getAll.onsuccess = function() {
+                const bookmarks = getAll.result;
+                const blob = new Blob([JSON.stringify(bookmarks)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'bookmarks.json';
+                a.click();
+                URL.revokeObjectURL(url);
+            };
+        });
+
+        document.getElementById('importBtn').addEventListener('click', function() {
+            document.getElementById('importFile').click();
+        });
+
+        document.getElementById('importFile').addEventListener('change', function(event) {
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const bookmarks = JSON.parse(e.target.result);
+                    const transaction = db.transaction(['bookmarks'], 'readwrite');
+                    const store = transaction.objectStore('bookmarks');
+                    bookmarks.forEach(bookmark => store.add(bookmark));
+                    loadBookmarks(); // Muat ulang bookmark setelah diimpor
+                };
+                reader.readAsText(file);
+            }
+        });
+
+        document.getElementById('backupBtn').addEventListener('click', function() {
+            const transaction = db.transaction(['bookmarks'], 'readonly');
+            const store = transaction.objectStore('bookmarks');
+            const getAll = store.getAll();
+
+            getAll.onsuccess = function() {
+                const bookmarks = getAll.result;
+                const blob = new Blob([JSON.stringify(bookmarks)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'bookmarks_backup.json';
+                a.click();
+                URL.revokeObjectURL(url);
+            };
+        });
+
+        document.getElementById('restoreBtn').addEventListener('click', function() {
+            document.getElementById('restoreFile').click();
+        });
+
+        document.getElementById('restoreFile').addEventListener('change', function(event) {
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const bookmarks = JSON.parse(e.target.result);
+                    const transaction = db.transaction(['bookmarks'], 'readwrite');
+                    const store = transaction.objectStore('bookmarks');
+                    bookmarks.forEach(bookmark => store.add(bookmark));
+                    loadBookmarks(); // Muat ulang bookmark setelah diimpor
+                };
+                reader.readAsText(file);
+            }
+        });
